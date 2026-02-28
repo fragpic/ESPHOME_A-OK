@@ -1,0 +1,208 @@
+# ═════════════════════════════════════════════════════════════════════════════
+#  ESPHome – A-OK RF Component  |  Full example configuration
+#  Hardware: ESP32-WROOM-32D + CC1101 433 MHz transceiver
+#  ESPHome: 2026.2+
+# ═════════════════════════════════════════════════════════════════════════════
+
+esphome:
+  name: aok-remote
+  friendly_name: A-OK RF Gateway
+
+esp32:
+  board: esp32dev          # ESP32-WROOM-32D
+  framework:
+    type: arduino
+
+# ── External components ───────────────────────────────────────────────────────
+external_components:
+  - source:
+      type: git
+      url: https://github.com/nrambaud/ESPHOME_A-OK
+      ref: main
+    components: [aok_rf]
+    refresh: 1d
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+
+logger:
+  level: DEBUG
+
+api:
+ota:
+  platform: esphome
+
+# ── SPI bus ───────────────────────────────────────────────────────────────────
+#   ESP32-WROOM-32D    CC1101
+#   ───────────────    ──────
+#   3V3          →     VCC    ← 3.3 V ONLY, never 5 V !
+#   GND          →     GND
+#   GPIO18 (SCK) →     SCK
+#   GPIO23 (MOSI)→     MOSI
+#   GPIO19 (MISO)←     MISO
+#   GPIO05       →     CSN    ← chip select
+#   GPIO12       ↔     GDO0   ← TX data out
+#   GPIO27       ←     GDO2   ← RX data out
+#   ANT                ANT    ← 17.3 cm wire
+#
+# ⚠️  Strapping pins avoided: GPIO0/2/5/12/15 must not have external pull
+#     resistors. GPIO05 used here for CSN has no pull on CC1101 side → OK.
+spi:
+  clk_pin:  GPIO18
+  mosi_pin: GPIO23
+  miso_pin: GPIO19
+
+# ── CC1101 ────────────────────────────────────────────────────────────────────
+cc1101:
+  cs_pin: GPIO05
+  frequency: 433.92MHz
+  output_power: 1
+  modulation_type: ASK/OOK
+
+# ── Transmitter via GDO0 ──────────────────────────────────────────────────────
+remote_transmitter:
+  id: rf_tx
+  pin: GPIO12
+  carrier_duty_percent: 100%
+  on_transmit:
+    then:
+      - cc1101.begin_tx
+  on_complete:
+    then:
+      - cc1101.begin_rx
+
+# ── Receiver via GDO2 ─────────────────────────────────────────────────────────
+# NOTE: do NOT use 'dump: [aok]' — external protocols cannot register into
+# the built-in remote_base dump registry.
+# Use 'dump: [raw]' to see raw pulse timings, or rely on the A-OK decoded
+# log lines produced automatically by the aok_rf component below.
+remote_receiver:
+  id: rf_rx
+  pin: GPIO27
+  dump: [raw]          # raw dumps for debugging; AOK frames logged by aok_rf
+  tolerance: 40%
+  filter: 100us
+  idle: 10ms
+
+# ── A-OK RF component ─────────────────────────────────────────────────────────
+# This key is REQUIRED so ESPHome loads and compiles aok_rf.
+# Attach it to the remote_receiver and optionally define on_aok: triggers.
+aok_rf:
+  id: aok
+  receiver_id: rf_rx   # must match the remote_receiver id above
+
+  # Optional: fire automations on specific received packets
+  on_aok:
+    # No filter → fires on every valid A-OK packet
+    - then:
+        - lambda: |-
+            ESP_LOGI("aok", "Packet: id=0x%06X addr=0x%04X cmd=0x%02X",
+                     x.remote_id, x.address, x.command);
+
+    # Filter on a specific remote + channel + command
+    - remote_id: 0xABCDEF
+      address: 0x0001
+      command: DOWN
+      then:
+        - logger.log: "Physical remote → Blind 1 DOWN"
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  Cover entities
+# ─────────────────────────────────────────────────────────────────────────────
+cover:
+  - platform: template
+    name: "Blind – Channel 1"
+    device_class: blind
+    optimistic: true
+    open_action:
+      - remote_transmitter.transmit_aok:
+          transmitter_id: rf_tx
+          remote_id: 0xABCDEF   # ← replace with your remote_id from the logs
+          address: 0x0001
+          command: UP
+    stop_action:
+      - remote_transmitter.transmit_aok:
+          transmitter_id: rf_tx
+          remote_id: 0xABCDEF
+          address: 0x0001
+          command: STOP
+    close_action:
+      - remote_transmitter.transmit_aok:
+          transmitter_id: rf_tx
+          remote_id: 0xABCDEF
+          address: 0x0001
+          command: DOWN
+
+  - platform: template
+    name: "Blind – Channel 2"
+    device_class: blind
+    optimistic: true
+    open_action:
+      - remote_transmitter.transmit_aok:
+          transmitter_id: rf_tx
+          remote_id: 0xABCDEF
+          address: 0x0002
+          command: UP
+    stop_action:
+      - remote_transmitter.transmit_aok:
+          transmitter_id: rf_tx
+          remote_id: 0xABCDEF
+          address: 0x0002
+          command: STOP
+    close_action:
+      - remote_transmitter.transmit_aok:
+          transmitter_id: rf_tx
+          remote_id: 0xABCDEF
+          address: 0x0002
+          command: DOWN
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  Button entities
+# ─────────────────────────────────────────────────────────────────────────────
+button:
+  - platform: template
+    name: "Blind 1 – Up"
+    on_press:
+      - remote_transmitter.transmit_aok:
+          transmitter_id: rf_tx
+          remote_id: 0xABCDEF
+          address: 0x0001
+          command: UP
+
+  - platform: template
+    name: "Blind 1 – Stop"
+    on_press:
+      - remote_transmitter.transmit_aok:
+          transmitter_id: rf_tx
+          remote_id: 0xABCDEF
+          address: 0x0001
+          command: STOP
+
+  - platform: template
+    name: "Blind 1 – Down"
+    on_press:
+      - remote_transmitter.transmit_aok:
+          transmitter_id: rf_tx
+          remote_id: 0xABCDEF
+          address: 0x0001
+          command: DOWN
+
+  - platform: template
+    name: "Blind 1 – Program"
+    on_press:
+      - remote_transmitter.transmit_aok:
+          transmitter_id: rf_tx
+          remote_id: 0xABCDEF
+          address: 0x0001
+          command: PROGRAM
+
+
+  - platform: template
+    name: "All Blinds – Down"
+    on_press:
+      - remote_transmitter.transmit_aok:
+          transmitter_id: rf_tx
+          remote_id: 0xABCDEF
+          address: 0x000F        # channels 1-4 simultaneously
+          command: DOWN
