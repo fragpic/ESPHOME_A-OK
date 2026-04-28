@@ -16,19 +16,19 @@ class AOKTrigger : public Trigger<AOKData> {
  public:
   void process(const AOKData &data) {
     if (has_remote_id_ && data.remote_id != remote_id_) return;
-    if (has_address_   && data.address   != address_)   return;
-    if (has_command_   && data.command   != command_)   return;
+    if (has_address_ && data.address != address_) return;
+    if (has_command_ && data.command != command_) return;
     this->trigger(data);
   }
 
   void set_remote_id(uint32_t v) { remote_id_ = v; has_remote_id_ = true; }
-  void set_address  (uint16_t v) { address_   = v; has_address_   = true; }
-  void set_command  (uint8_t  v) { command_   = v; has_command_   = true; }
+  void set_address(uint16_t v) { address_ = v; has_address_ = true; }
+  void set_command(uint8_t v) { command_ = v; has_command_ = true; }
 
  protected:
   uint32_t remote_id_{0};
   uint16_t address_{0};
-  uint8_t  command_{0};
+  uint8_t command_{0};
   bool has_remote_id_{false};
   bool has_address_{false};
   bool has_command_{false};
@@ -78,13 +78,13 @@ class AOKAction : public Action<Ts...> {
 
   TEMPLATABLE_VALUE(uint32_t, remote_id)
   TEMPLATABLE_VALUE(uint16_t, address)
-  TEMPLATABLE_VALUE(uint8_t,  command)
+  TEMPLATABLE_VALUE(uint8_t, command)
 
-  void play(Ts... x) override {
+  void play(const Ts &... x) override {
     AOKData data;
     data.remote_id = this->remote_id_.value(x...);
-    data.address   = this->address_.value(x...);
-    data.command   = this->command_.value(x...);
+    data.address = this->address_.value(x...);
+    data.command = this->command_.value(x...);
 
     auto call = this->transmitter_->transmit();
     AOKProtocol proto;
