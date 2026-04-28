@@ -80,6 +80,7 @@ class AOKAction : public Action<Ts...> {
   TEMPLATABLE_VALUE(uint16_t, address)
   TEMPLATABLE_VALUE(uint8_t, command)
 
+  // ESPHome 2025.11+ passes automation arguments by const reference.
   void play(const Ts &... x) override {
     AOKData data;
     data.remote_id = this->remote_id_.value(x...);
